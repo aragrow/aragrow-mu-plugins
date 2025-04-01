@@ -52,6 +52,18 @@ class Aragrow_WOO_Integration_MU_Plugins
         // Modify the order line headers
         add_filter('wpo_wcpdf_get_aragrow_time_invoice_template_table_headers', [$this, 'custom_aragrow_time_invoice_table_headers'], 10, 2);
         add_filter('wpo_wcpdf_get_aragrow_invoice_template_table_headers', [$this, 'custom_aragrow_invoice_table_headers'], 10, 2);
+    
+        // Register the custom order status
+        add_action('init', [$this, 'register_custom_invoice_paid_status' ]);
+        // Add the custom status to WooCommerce order statuses
+        add_filter('wc_order_statuses', [$this, 'add_custom_invoice_paid_to_order_statuses'], 10, 1);
+        // For WooCommerce PDF Invoices & Packing Slips Plugin:
+        add_filter('wpo_wcpdf_document_is_allowed', [$this, 'enable_invoice_for_custom_invoice_paid_status'], 10, 2);
+        // Add Email Notifications for Invoice Paid
+        add_action('woocommerce_order_status_invoice_paid', [$this, 'send_custom_invoice_paid_email_notification'], 10, 1);
+        // Add custom color for Invoice Paid status in admin panel
+        add_action('admin_head', [$this, 'custom_invoice_paid_admin_styles']);
+
     }
 
     // Helper function to get all product IDs in the TIMEGROW category
@@ -276,14 +288,14 @@ class Aragrow_WOO_Integration_MU_Plugins
     }
     // Save custom field value
 
-    function save_timekeeping_invoice_field($order_id) {
+    public function save_timekeeping_invoice_field($order_id) {
         if(WP_DEBUG) error_log(__CLASS__.'::'.__FUNCTION__);
 
         $is_timekeeping = isset($_POST['timekeeping_invoice']) ? 'yes' : 'no';
         update_post_meta($order_id, '_timekeeping_invoice', $is_timekeeping);
     }
 
-    function custom_aragrow_time_invoice_table_headers($headers, $document) {
+    public function custom_aragrow_time_invoice_table_headers($headers, $document) {
         if(WP_DEBUG) error_log(__CLASS__.'::'.__FUNCTION__);
 
         $headers = array(
@@ -295,7 +307,7 @@ class Aragrow_WOO_Integration_MU_Plugins
         return $headers;
     }
 
-    function custom_aragrow_invoice_table_headers($headers, $document) {
+    public function custom_aragrow_invoice_table_headers($headers, $document) {
         if(WP_DEBUG) error_log(__CLASS__.'::'.__FUNCTION__);
 
         $headers = array(
@@ -306,6 +318,68 @@ class Aragrow_WOO_Integration_MU_Plugins
         );
         return $headers;
     }
+
+    public function register_custom_invoice_paid_status() {
+        if(WP_DEBUG) error_log(__CLASS__.'::'.__FUNCTION__);
+
+        register_post_status('wc-invoice_paid', array(
+            'label'                     => _x('Invoice Paid', 'Order status', 'woocommerce'),
+            'public'                    => true,
+            'exclude_from_search'       => false,
+            'show_in_admin_all_list'    => true,
+            'show_in_admin_status_list' => true,
+            'label_count'               => _n_noop('Invoice Paid (%s)', 'Invoice Paid (%s)', 'woocommerce'),
+        ));
+    }
+
+    public function add_custom_invoice_paid_to_order_statuses($order_statuses) {
+        if(WP_DEBUG) error_log(__CLASS__.'::'.__FUNCTION__);
+
+        $order_statuses['wc-invoice_paid'] = _x('Invoice Paid', 'Order status', 'woocommerce');
+        return $order_statuses;
+    }
+
+    public function enable_invoice_for_custom_invoice_paid_status($allowed, $document) {
+        if(WP_DEBUG) error_log(__CLASS__.'::'.__FUNCTION__);
+
+        if ($document->type == 'invoice') {
+            $order = $document->order;
+            if ($order->get_status() == 'invoice_paid') {
+                $allowed = true;
+            }
+        }
+        return $allowed;
+    }
+
+
+    public function send_custom_invoice_paid_email_notification($order_id) {
+        if(WP_DEBUG) error_log(__CLASS__.'::'.__FUNCTION__);
+
+        $order = wc_get_order($order_id);
+    
+        // Send an email to the customer
+        $mailer = WC()->mailer();
+        $email_content = sprintf(
+            __('Your invoice #%s has been marked as paid.', 'woocommerce'),
+            $order->get_order_number()
+        );
+        $email_heading = __('Invoice Paid Notification', 'woocommerce');
+        
+        $mailer->send(
+            $order->get_billing_email(),
+            $email_heading,
+            $email_content
+        );
+    }
+
+    public function custom_invoice_paid_admin_styles() {
+        if(WP_DEBUG) error_log(__CLASS__.'::'.__FUNCTION__);
+        
+        echo '<style>
+            .status-wc-invoice_paid { background: #28a745; color: #fff; }
+        </style>';
+    }
+
 }
 
 New Aragrow_WOO_Integration_MU_Plugins();
