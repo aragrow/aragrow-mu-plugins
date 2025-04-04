@@ -24,14 +24,14 @@ class Aragrow_WOO_Integration_MU_Plugins
     {
 
         if(WP_DEBUG) error_log(__CLASS__.'::'.__FUNCTION__);
-      //  add_filter('woocommerce_before_order_itemmeta', [$this, 'custom_admin_order_item_quantity_input'], 10, 2);
-      // add_action('woocommerce_before_order_item_quantity_save', [$this, 'allow_decimal_quantities_in_orders'], 10, 2);
-      //  add_filter('woocommerce_order_item_quantity_html', [$this, 'display_decimal_quantities_in_admin'], 10, 2);
-      //  add_action('admin_menu', [$this, 'add_manual_payments_submenu']);
+        //  add_filter('woocommerce_before_order_itemmeta', [$this, 'custom_admin_order_item_quantity_input'], 10, 2);
+        // add_action('woocommerce_before_order_item_quantity_save', [$this, 'allow_decimal_quantities_in_orders'], 10, 2);
+        //  add_filter('woocommerce_order_item_quantity_html', [$this, 'display_decimal_quantities_in_admin'], 10, 2);
+        //  add_action('admin_menu', [$this, 'add_manual_payments_submenu']);
         add_action('add_meta_boxes', [ $this, 'add_manual_payment_meta_box' ]);
         // Save meta box data
         add_action('woocommerce_process_shop_order_meta', [ $this,'save_manual_payment_data' ], 10, 2);
-      //  add_action('woocommerce_admin_order_data_after_order_details', [$this, 'display_manual_payment_details']);
+        //  add_action('woocommerce_admin_order_data_after_order_details', [$this, 'display_manual_payment_details']);
 
         // Add Custom Field
         add_action('show_user_profile', [ $this, 'add_custom_field_ein_ssn' ]);  // Profile
@@ -57,7 +57,7 @@ class Aragrow_WOO_Integration_MU_Plugins
         add_action('init', [$this, 'register_custom_invoice_paid_status' ]);
         // Add the custom status to WooCommerce order statuses
         add_filter('wc_order_statuses', [$this, 'add_custom_invoice_paid_to_order_statuses'], 10, 1);
-        // For WooCommerce PDF Invoices & Packing Slips Plugin:
+        // For WooCommerce PDF Invoices & Packing Slips Plugin
         add_filter('wpo_wcpdf_document_is_allowed', [$this, 'enable_invoice_for_custom_invoice_paid_status'], 10, 2);
         // Add Email Notifications for Invoice Paid
         add_action('woocommerce_order_status_invoice_paid', [$this, 'send_custom_invoice_paid_email_notification'], 10, 1);
@@ -142,6 +142,7 @@ class Aragrow_WOO_Integration_MU_Plugins
     }
 
     function add_manual_payment_meta_box() {
+        if(WP_DEBUG) error_log(__CLASS__.'::'.__FUNCTION__);
         $screen = wc_get_container()->get(CustomOrdersTableController::class)->custom_orders_table_usage_is_enabled()
             ? wc_get_page_screen_id('shop-order')
             : 'shop_order';
@@ -158,6 +159,7 @@ class Aragrow_WOO_Integration_MU_Plugins
     }
 
     function render_manual_payment_meta_box($post_or_order_object) {
+
         // Get the order object whether HPOS is enabled or not
         $order = ($post_or_order_object instanceof WP_Post)
             ? wc_get_order($post_or_order_object->ID)
@@ -382,4 +384,91 @@ class Aragrow_WOO_Integration_MU_Plugins
 
 }
 
-New Aragrow_WOO_Integration_MU_Plugins();
+class Aragrow_MyWooUnpaidInvoiceDashboardWidget {
+    
+    public function __construct() {
+        
+        if(WP_DEBUG) error_log(__CLASS__.'::'.__FUNCTION__);
+        add_action('wp_dashboard_setup', [$this, 'woocommerce_unpaid_invoices_widget'],999);
+
+    }
+
+    public function woocommerce_unpaid_invoices_widget() {
+        if(WP_DEBUG) error_log(__CLASS__.'::'.__FUNCTION__);
+        $return = wp_add_dashboard_widget(
+            'aragrow_woocommerce_unpaid_invoices', 
+            'Unpaid Invoices', 
+            [$this, 'woocommerce_unpaid_invoices_callback']
+        );
+    }
+
+    public function woocommerce_unpaid_invoices_callback() {
+        if(WP_DEBUG) error_log(__CLASS__.'::'.__FUNCTION__);
+        // Get unpaid invoices
+        $unpaid_invoices = $this->get_unpaid_invoices();
+        if(empty($unpaid_invoices)) {
+            echo '<p>No unpaid invoices found</p>';
+            return;
+        }
+
+        // Sort invoices by client and invoice date
+        usort($unpaid_invoices, function($a, $b) {
+            if ($a['client'] == $b['client']) {
+                return $a['invoice_date']->getTimestamp() <=> $b['invoice_date']->getTimestamp();
+            } else {
+                return $a['client'] <=> $b['client'];
+            }
+        });
+
+        // Display invoices
+        echo '<table class="aragrow-invoices">';
+        echo '<tr><th>Client</th><th>Invoice Date</th><th>No.</th><th>Amount</th></tr>';
+        foreach ($unpaid_invoices as $invoice) {
+
+            echo '<tr>';
+            echo '<td>' . esc_html($invoice['client']) . '</td>';
+            echo '<td>' . esc_html($invoice['invoice_date']->date('m/d/Y')) . '</td>';
+            echo '<td><a href="' . esc_url('admin.php?page=wc-orders&action=edit&id=' . $invoice['invoice_number'])  .'">' . esc_html($invoice['invoice_number']) . '</a></td>';
+            echo '<td>' . $invoice['amount'] . '</td>';
+            echo '</tr>';
+        }   
+        echo '</table>';
+        echo '<style>.aragrow-invoices td{padding:8px 12px;}</style>';
+    }
+
+    public function get_unpaid_invoices() {
+        $unpaid_invoices = [];
+        global $wpdb;
+        if(WP_DEBUG) error_log(__CLASS__.'::'.__FUNCTION__);
+        if (!function_exists('wc_get_orders')) {
+            var_dump('ERROR -> WooCommerce not loaded!. Contact your administrator.'); 
+            return $unpaid_invoices;
+        }
+
+        $args = [
+            'type' => 'shop_order',
+            'status' => 'wc-pending'
+        ];
+        $orders = wc_get_orders($args);
+        if (!$orders) return $unpaid_invoices;
+        foreach ($orders as $order_data) {
+            $invoice_number = $order_data->get_order_number();
+            $client = $order_data->get_billing_first_name() . ' ' . $order_data->get_billing_last_name();
+            $invoice_date = $order_data->get_date_created();
+            $amount = $order_data->get_formatted_order_total();
+            $unpaid_invoices[] = array(
+                'client' => $client,
+                'invoice_date' => $invoice_date,
+                'invoice_number' => $invoice_number,
+                'amount' => $amount
+            );
+        }
+        return $unpaid_invoices;
+    }
+}
+// In your plugin main file:
+add_action('plugins_loaded', function() {
+    new Aragrow_WOO_Integration_MU_Plugins();
+    new Aragrow_MyWooUnpaidInvoiceDashboardWidget();
+});
+
